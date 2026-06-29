@@ -1,0 +1,478 @@
+// // /*
+// //   UNO pH + TDS (your formula) + DS18B20 temperature + Ra-02 (SX1278) LoRa TX
+// // */
+
+
+
+#include <Arduino.h>
+#include <SPI.h>
+#include <LoRa.h>
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <WebServer.h>
+#include <Preferences.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <time.h>
+
+// --- Configuration ---
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+
+// AP Mode Configuration
+const char* AP_SSID = "AquaMonitorSetup";
+const char* AP_PASS = "12345678";
+const char* DATA_VIEW_URL = "https://aqua-monitor-bubt.netlify.app";
+
+// LoRa Configuration
+const int LORA_CS   = 5;
+const int LORA_RST  = 14;
+const int LORA_DIO0 = 26;
+const long LORA_FREQ = 433E6; 
+
+// Firebase/NTP Configuration
+const char* FB_HOST = "waterlora-v1-default-rtdb.firebaseio.com";
+const char* NTP1 = "pool.ntp.org";
+
+// --- Global Objects ---
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+WebServer server(80);
+Preferences prefs;
+
+// Global State Flags
+bool apMode = false;
+unsigned long apStartTime = 0;
+String wifiListHTML = "";
+
+// --- Data Structure ---
+struct Reading {
+  float pH      = NAN;
+  float tds     = NAN;
+  float tempC   = NAN;
+  int   doState = 0;
+  int   rssi    = 0;
+  float snr     = 0;
+};
+Reading latest;
+
+// --- Prototypes (Default arguments are defined here) ---
+void showOLED(String line1, String line2 = "", String line3 = "");
+bool connectSavedWiFi();
+void scanWiFi();
+void handleRoot();
+void handleConnect();
+bool ensureTime();
+bool parseCSV(const String& s, Reading& out);
+void drawOLED_LoRa(const Reading& r);
+bool firebaseWrite(const Reading& r);
+String chipIdHex();
+
+// ---------------- OLED Helper Functions ----------------
+// NOTE: Default arguments removed from the definition to fix the compiler error.
+void showOLED(String line1, String line2, String line3) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println(line1);
+  if (line2 != "") {
+    display.setCursor(0, 16); 
+    display.println(line2);
+  }
+  if (line3 != "") {
+    display.setCursor(0, 32); 
+    display.println(line3);
+  }
+  display.display();
+}
+
+// ---------------- Wi-Fi Provisioning Functions ----------------
+
+bool connectSavedWiFi() {
+  prefs.begin("wifiCreds", true);
+  String ssid = prefs.getString("ssid", "");
+  String pass = prefs.getString("pass", "");
+  prefs.end();
+
+  if (ssid == "") return false;
+
+  Serial.print("Connecting to: "); Serial.println(ssid);
+  showOLED("Connecting to:", ssid, "Please Wait...");
+  
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid.c_str(), pass.c_str());
+
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 40) { 
+    delay(250);
+    attempts++;
+    if (attempts % 8 == 0) {
+      showOLED("Connecting to:", ssid, "Attempt " + String(attempts / 8));
+    }
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("Connection successful.");
+    return true;
+  } else {
+    Serial.println("Connection failed.");
+    return false;
+  }
+}
+
+void scanWiFi() {
+  int n = WiFi.scanNetworks();
+  wifiListHTML = "<h2 style='color:#00796B; border-bottom: 2px solid #B2DFDB; padding-bottom: 5px;'>Available Networks</h2>";
+
+  if (n == 0) {
+    wifiListHTML += "<p style='color:#E53935;'>No Wi-Fi networks found.</p>";
+  } else {
+    wifiListHTML += "<ul style='list-style: none; padding: 0;'>";
+    for (int i = 0; i < n; i++) {
+      String color = (WiFi.RSSI(i) > -65) ? "#28A745" : "#007BFF"; 
+      wifiListHTML += "<li style='background:#f1f8e9; padding: 10px; margin-bottom: 5px; border-radius: 5px; border-left: 5px solid " + color + "; box-shadow: 0 1px 3px rgba(0,0,0,0.1);'>";
+      wifiListHTML += "<strong>" + WiFi.SSID(i) + "</strong>";
+      wifiListHTML += " <span style='float: right; color: " + color + "; font-weight: bold;'>";
+      wifiListHTML += WiFi.RSSI(i);
+      wifiListHTML += " dBm</span>";
+      wifiListHTML += "</li>";
+    }
+    wifiListHTML += "</ul>";
+  }
+}
+
+void handleRoot() {
+  scanWiFi();
+  
+  String page = R"rawliteral(
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AquaMonitor V.1 Setup Portal</title>
+<style>
+body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #CFD8DC 0%, #ECEFF1 100%); padding: 20px; margin: 0; }
+.container { max-width: 600px; margin: 40px auto; background: #FFFFFF; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15); border-top: 5px solid #00BCD4; }
+h1 { color: #00796B; text-align: center; margin-bottom: 20px; border-bottom: 1px solid #E0F2F1; padding-bottom: 10px; }
+input[type="text"], input[type="password"] { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #B0BEC5; border-radius: 6px; box-sizing: border-box; }
+.button-group { display: flex; justify-content: space-between; margin-top: 20px; }
+button, .link-button { padding: 12px 20px; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; text-decoration: none; text-align: center; flex-grow: 1; margin: 0 5px; }
+button[type="submit"] { background-color: #4CAF50; color: white; }
+.link-button { background-color: #2196F3; color: white; }
+@media (max-width: 480px) { .button-group { flex-direction: column; } button, .link-button { margin: 5px 0; } }
+</style>
+</head>
+<body>
+<div class='container'>
+<h1>AquaMonitor V.1 Wi-Fi Setup</h1>
+)rawliteral";
+
+  page += wifiListHTML;
+
+  page += "<h2>Connect to a Network</h2>";
+  page += "<form action='/connect' method='POST'>";
+  page += "<input type='text' name='ssid' placeholder='WiFi Name (SSID)' required>";
+  page += "<input type='password' name='password' placeholder='WiFi Password' required>";
+  
+  page += "<div class='button-group'>";
+  page += "<button type='submit'>Connect & Save</button>";
+  page += "<a class='link-button' href='" + String(DATA_VIEW_URL) + "' target='_blank'>Device Data View</a>";
+  page += "</div>";
+  page += "</form>";
+
+  page += "</div></body></html>";
+
+  server.send(200, "text/html", page);
+}
+
+void handleConnect() {
+  if (!server.hasArg("ssid") || !server.hasArg("password")) {
+    server.send(400, "text/plain", "Missing SSID or Password");
+    return;
+  }
+  
+  String ssid = server.arg("ssid");
+  String password = server.arg("password");
+
+  // Feedback page before restart
+  String responsePage = "<html><body><h1>Connection Initiated</h1><p>Attempting to connect to: <strong>" + ssid + "</strong>. The device will now try to connect and restart into operational mode.</p></body></html>";
+  server.send(200, "text/html", responsePage);
+
+  // Save credentials to NVS
+  prefs.begin("wifiCreds", false);
+  prefs.putString("ssid", ssid);
+  prefs.putString("pass", password);
+  prefs.end();
+
+  // Reset to apply changes and enter STA mode
+  ESP.restart();
+}
+
+// ---------------- LoRa and Firebase Functions ----------------
+
+bool ensureTime() {
+  time_t now = time(nullptr);
+  if (now > 1700000000) return true; 
+  
+  Serial.print("Synchronizing time...");
+  configTime(0, 0, NTP1);
+  uint32_t t0 = millis();
+  while (time(nullptr) < 1700000000 && millis() - t0 < 8000) {
+    delay(500);
+    Serial.print(".");
+  }
+  
+  if (time(nullptr) > 1700000000) {
+    Serial.println("\nTime Synced.");
+    return true;
+  } else {
+    Serial.println("\nTime Sync Failed.");
+    return false;
+  }
+}
+
+String chipIdHex() {
+  uint64_t id = ESP.getEfuseMac();
+  char buf[17];
+  snprintf(buf, sizeof(buf), "%08X%08X", (uint32_t)(id >> 32), (uint32_t)id);
+  return String(buf);
+}
+
+bool parseCSV(const String& s, Reading& out) {
+  if (s.length() < 3) return false;
+
+  float nums[4];
+  int idx = 0;
+  int start = 0;
+
+  for (int i = 0; i <= s.length(); i++) {
+    if (i == s.length() || s[i] == ',') {
+      if (idx >= 4) break; 
+      String tok = s.substring(start, i); tok.trim();
+      
+      if (tok.length() == 0 || tok.equalsIgnoreCase("nan"))
+        nums[idx++] = NAN;
+      else
+        nums[idx++] = tok.toFloat();
+        
+      start = i + 1;
+    }
+  }
+
+  if (idx != 4) return false; 
+
+  out.pH      = nums[0];
+  out.tds     = nums[1];
+  out.tempC   = nums[2];
+  out.doState = (int)nums[3];
+  return true;
+}
+
+void drawOLED_LoRa(const Reading& r) {
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+
+  // Row 1: IP Address and Status
+  display.setCursor(0, 0);
+  display.print("IP:"); display.print(WiFi.localIP().toString());
+  display.print(" | RSSI:"); display.print(r.rssi);
+  
+  display.setTextSize(1); 
+  
+  // Row 2 (Line 15): pH
+  display.setCursor(0, 18);
+  display.print("PH:"); 
+  if (isnan(r.pH)) display.print("--"); else display.print(r.pH, 1);
+  
+  // Row 3 (Line 30): TDS
+  display.setCursor(0, 30);
+  display.print("TDS:"); 
+  if (isnan(r.tds)) display.print("--");
+  else { display.print((int)r.tds); display.print("ppm"); }
+
+  // Row 4 (Line 45): Temperature
+  display.setCursor(0, 40);
+  display.print("Tmp:"); 
+  if (isnan(r.tempC)) display.print("--"); else display.print(r.tempC, 1);
+  display.print((char)247); display.print("C");
+
+  // Row 5 (Line 58): DO State and Hub Tag
+  display.setTextSize(1);
+  display.setCursor(0, 52);
+  display.print("DO:"); display.print(r.doState ? "HIGH" : "LOW");
+  
+  display.setCursor(60, 52);
+  display.print("<<BUBT_HUB>>"); 
+
+  display.display();
+}
+
+bool firebaseWrite(const Reading& r) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Firebase skipped: WiFi disconnected.");
+    return false;
+  }
+  if (!ensureTime()) return false;
+
+  WiFiClientSecure client;
+  client.setInsecure(); 
+
+  if (!client.connect(FB_HOST, 443)) {
+    Serial.println("Firebase connection failed.");
+    return false;
+  }
+
+  String device = chipIdHex();
+  time_t now = time(nullptr);
+  String path = "/sensors/" + device + "/readings/" + String((unsigned long)now) + ".json"; 
+
+  // Construct JSON body (Simplified for this example)
+  String body = "{";
+  body += "\"pH\":" + String(r.pH, 2) + ",";
+  body += "\"tds_ppm\":" + (isnan(r.tds) ? "null" : String((int)r.tds)) + ",";
+  body += "\"tempC\":" + (isnan(r.tempC) ? "null" : String(r.tempC, 1)) + ",";
+  body += "\"do\":" + String(r.doState) + ",";
+  body += "\"rssi\":" + String(r.rssi) + ",";
+  body += "\"snr\":" + String(r.snr, 1) + ",";
+  body += "\"ts\":" + String((unsigned long)now);
+  body += "}";
+
+  // HTTPS PUT Request
+  client.print(String("PUT ") + path + " HTTP/1.1\r\n" +
+               "Host: " + FB_HOST + "\r\n" +
+               "User-Agent: ESP32-LoRa-Client\r\n" +
+               "Content-Type: application/json\r\n" +
+               "Content-Length: " + String(body.length()) + "\r\n" +
+               "Connection: close\r\n\r\n" +
+               body);
+
+  // Read response
+  uint32_t t0 = millis();
+  while (client.connected() && millis() - t0 < 3000) {
+    if (client.readStringUntil('\n').startsWith("HTTP/1.1 200 OK")) {
+        Serial.println("Firebase: SUCCESS");
+        break;
+    }
+  }
+  client.stop();
+  return true;
+}
+
+// ---------------- Setup ----------------
+void setup() {
+  Serial.begin(115200);
+  Wire.begin(21, 22); 
+  
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("SSD1306 failed");
+  }
+
+  showOLED("Aqua Monitor V.1", "Starting...");
+
+  // 1. Try to connect to saved Wi-Fi
+  if (connectSavedWiFi()) {
+    apMode = false;
+    Serial.println("Entering Operation Mode (STA).");
+    showOLED("WiFi Connected", WiFi.SSID(), "IP: " + WiFi.localIP().toString());
+
+    // Initialize LoRa in operational mode
+    LoRa.setPins(LORA_CS, LORA_RST, LORA_DIO0);
+    if (!LoRa.begin(LORA_FREQ)) {
+      Serial.println("LoRa init failed. HALTING.");
+      showOLED("LoRa Failed!", "Check Wiring!");
+      while (1) delay(1000); 
+    }
+    LoRa.setSpreadingFactor(9);
+    LoRa.setSignalBandwidth(125E3);
+    LoRa.setCodingRate4(5);
+    LoRa.enableCrc();
+    Serial.println("LoRa Listening...");
+    ensureTime();
+
+  } else {
+    // 2. Start AP Mode for configuration
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(AP_SSID, AP_PASS);
+    IPAddress myIP = WiFi.softAPIP();
+    
+    apMode = true;
+    apStartTime = millis();
+    Serial.println("--- Entering Setup Mode (AP) ---");
+    Serial.print("Portal IP: "); Serial.println(myIP);
+    showOLED("AP Mode Active:", "SSID: " + String(AP_SSID), "IP: " + myIP.toString());
+  }
+
+  // Start the web server in either mode
+  server.on("/", handleRoot);
+  server.on("/connect", HTTP_POST, handleConnect);
+  server.begin();
+  Serial.println("Web Server Started.");
+}
+
+// ---------------- Loop ----------------
+uint32_t lastUploadMs = 0;
+const uint32_t MIN_UPLOAD_PERIOD_MS = 3000;
+
+void loop() {
+  server.handleClient();
+
+  if (apMode) {
+    // Only handle web setup in AP mode
+    if ((millis() - apStartTime) > 30000) {
+       apStartTime = millis();
+       showOLED("AP Mode Active:", "SSID: " + String(AP_SSID), "IP: " + WiFi.softAPIP().toString());
+    }
+
+  } else {
+    // **STA/Operation Mode (LoRa Receiver)**
+    
+    // Check for incoming LoRa packet
+    int packetSize = LoRa.parsePacket();
+    if (packetSize) {
+      String str;
+      while (LoRa.available()) str += (char)LoRa.read();
+
+      latest.rssi = LoRa.packetRssi();
+      latest.snr  = LoRa.packetSnr();
+
+      str.trim();
+      Serial.print("RX: "); Serial.print(str); 
+      Serial.print(" | RSSI: "); Serial.println(latest.rssi);
+
+      Reading r;
+      if (parseCSV(str, r)) {
+        r.rssi = latest.rssi;
+        r.snr  = latest.snr;
+        latest = r;
+        
+        // Update the OLED immediately upon receiving new data
+        drawOLED_LoRa(latest);
+
+        // Upload data to Firebase
+        uint32_t nowMs = millis();
+        if (nowMs - lastUploadMs >= MIN_UPLOAD_PERIOD_MS) {
+          lastUploadMs = nowMs;
+          firebaseWrite(latest);
+        }
+      } else {
+        Serial.println("Parse failed: Invalid CSV format.");
+      }
+    }
+    
+    // Auto-reconnect Wi-Fi logic for operation mode
+    static uint32_t lastWiFiCheckMs = 0;
+    if (WiFi.status() != WL_CONNECTED && millis() - lastWiFiCheckMs >= 10000) {
+        lastWiFiCheckMs = millis();
+        Serial.println("WiFi lost. Reconnecting...");
+        if (!connectSavedWiFi()) {
+             // If reconnection fails, restart to enter AP mode
+             Serial.println("Reconnection failed. Restarting to re-enter AP mode.");
+             ESP.restart();
+        }
+    }
+  }
+}
+
+ 
