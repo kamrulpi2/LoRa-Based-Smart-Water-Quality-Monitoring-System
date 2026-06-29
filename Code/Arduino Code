@@ -1,1 +1,195 @@
+/* SX1278      Arduino UNO
+-----------------------
+VCC   --->  3.3V
+GND   --->  GND
+SCK   --->  D13
+MISO  --->  D12
+MOSI  --->  D11
+CS    --->  D10
+RST   --->  D9                                    
+DIO0  --->  D2
+ANT   --->  Antenna
+*/
+
+#include <Arduino.h>
+#include <SPI.h>
+#include <LoRa.h>
+#include <math.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+// ---------- Pins ----------
+const byte PH_PIN    = A0;
+const byte TEMP_PIN  = A1;
+const byte DO_PIN    = 4;
+const byte TDS_PIN   = A2;   // << Your required line
+
+// LoRa pins
+const int LORA_CS   = 10;
+const int LORA_RST  = 9;
+const int LORA_DIO0 = 2;
+
+// DS18B20
+const byte TEMP_DS_PIN = 3;
+OneWire oneWire(TEMP_DS_PIN);
+DallasTemperature sensors(&oneWire);
+
+// ---------- ADC ----------
+const float VREF_VOLTS = 5.00f;
+
+// ---------- pH Calibration ----------
+const float CAL_M_25C = -6.23f;
+const float CAL_B     = 32.45f;
+
+// ---------- Temperature Handling ----------
+bool  TEMP_ENABLE = true;
+float slopeAtTemp(float degC){ return CAL_M_25C * ((degC + 273.15f) / 298.15f); }
+
+// ---------- Filtering ----------
+const int   N_SAMPLES   = 25;
+const int   GROUPS      = 5;
+const float MAD_K       = 2.5f;
+const float IIR_ALPHA   = 0.25f;
+const float TDS_ALPHA   = 0.25f;
+
+float v_iir   = NAN;
+float ph_iir  = NAN;
+float tds_iir = NAN;
+
+// ---------- Helper ----------
+float readVoltageOnce(byte pin) {
+  return (analogRead(pin) / 1023.0f) * VREF_VOLTS;
+}
+
+float median(float *a, int n) {
+  float b[64];
+  n = min(n, 64);
+  for (int i=0;i<n;i++) b[i]=a[i];
+  for (int i=1;i<n;i++){
+    float k=b[i]; int j=i-1;
+    while (j>=0 && b[j]>k){ b[j+1]=b[j]; j--; }
+    b[j+1]=k;
+  }
+  return b[n/2];
+}
+
+float mean(const float *a, int n){
+  double s=0; for(int i=0;i<n;i++) s+=a[i]; return (float)(s/n);
+}
+
+float robustVoltage(byte pin) {
+  static float buf[64];
+  int N = min(N_SAMPLES, 64);
+  for (int i=0;i<N;i++) buf[i] = readVoltageOnce(pin);
+
+  float med = median(buf, N);
+  static float dev[64];
+  for (int i=0;i<N;i++) dev[i] = fabsf(buf[i]-med);
+  float MAD = median(dev, N);
+
+  float keep[64]; int k=0;
+  float thr = (MAD>0? MAD_K*MAD : 0.05f);
+  for (int i=0;i<N;i++)
+    if (fabsf(buf[i]-med) <= thr) keep[k++] = buf[i];
+
+  if (k < 5) return med;
+
+  int groups = min(GROUPS, k);
+  int per = k / groups;
+  if (per < 2) return median(keep, k);
+
+  static float gmean[16];
+  for (int g=0; g<groups; g++)
+    gmean[g] = mean(&keep[g*per], per);
+  return median(gmean, groups);
+}
+
+// ---------- pH ----------
+float pH_from_voltage(float vPh, float tC, bool useTemp) {
+  if (useTemp) return slopeAtTemp(tC) * vPh + CAL_B;
+  return CAL_M_25C * vPh + CAL_B;
+}
+
+// ---------- YOUR TDS Formula Here ----------
+float TDS_ppm_from_voltage(float v, float tC) {
+
+  // Convert voltage to TDS using your cubic equation
+  float tds = (133.42 * v * v * v
+              - 255.86 * v * v
+              + 857.39 * v) * 0.5;
+
+  // Temperature compensation
+  tds = tds / (1.0 + 0.02 * (tC - 25.0));
+
+  if (tds < 0) tds = 0;
+
+  return tds;
+}
+
+// ---------- LoRa ----------
+const unsigned long TX_PERIOD_MS = 1000;
+unsigned long lastTx = 0;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(DO_PIN, INPUT);
+
+  sensors.begin();
+
+  LoRa.setPins(LORA_CS, LORA_RST, LORA_DIO0);
+  LoRa.begin(433E6);
+  LoRa.setSpreadingFactor(9);
+  LoRa.setSignalBandwidth(125E3);
+  LoRa.setCodingRate4(5);
+  LoRa.setTxPower(18);
+
+  Serial.println(F("\nUNO pH + TDS(Your Formula) + DS18B20 + LoRa TX"));
+}
+
+void loop() {
+  float vPh_raw  = robustVoltage(PH_PIN);
+  float vTds_raw = robustVoltage(TDS_PIN);
+
+  if (isnan(v_iir)) v_iir = vPh_raw;
+  v_iir = v_iir + IIR_ALPHA * (vPh_raw - v_iir);
+
+  // Read DS18B20 Temperature
+  float tC = 25.0f;
+  sensors.requestTemperatures();
+  tC = sensors.getTempCByIndex(0);
+  if (tC < -50 || tC > 125) tC = 25.0f;
+
+  // pH and TDS
+  float ph  = pH_from_voltage(v_iir, tC, true);
+  float tds = TDS_ppm_from_voltage(vTds_raw, tC);
+
+  if (isnan(ph_iir))  ph_iir  = ph;
+  if (isnan(tds_iir)) tds_iir = tds;
+
+  ph_iir  += IIR_ALPHA * (ph  - ph_iir);
+  tds_iir += TDS_ALPHA * (tds - tds_iir);
+
+
+  int doState = digitalRead(DO_PIN);
+
+  // Serial print
+  Serial.print("pH "); Serial.print(ph_iir,2);
+  Serial.print(" | TDS "); Serial.print(tds_iir,0);
+  Serial.print("ppm | Temp "); Serial.print(tC,1);
+  Serial.print("C | DO "); Serial.println(doState);
+
+  // Send LoRa
+  unsigned long now = millis();
+  if (now - lastTx >= TX_PERIOD_MS) {
+    lastTx = now;
+    LoRa.beginPacket();
+    LoRa.print(ph_iir, 2); LoRa.print(',');
+    LoRa.print((long)tds_iir); LoRa.print(',');
+    LoRa.print(tC, 1); LoRa.print(',');
+    LoRa.print(doState);
+    LoRa.endPacket();
+  }
+
+  delay(250);
+}
 
