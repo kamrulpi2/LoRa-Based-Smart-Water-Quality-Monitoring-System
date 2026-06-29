@@ -1,0 +1,78 @@
+#define PH_PIN A0
+
+float phHistory[10];
+int historyIndex = 0;
+
+float getPH()
+{
+  int buf[20];
+
+  for(int i=0;i<20;i++)
+  {
+    buf[i] = analogRead(PH_PIN);
+    delay(10);
+  }
+
+  // Sort
+  for(int i=0;i<19;i++)
+  {
+    for(int j=i+1;j<20;j++)
+    {
+      if(buf[i] > buf[j])
+      {
+        int t = buf[i];
+        buf[i] = buf[j];
+        buf[j] = t;
+      }
+    }
+  }
+
+  long sum = 0;
+
+  for(int i=5;i<15;i++)
+  {
+    sum += buf[i];
+  }
+
+  float adc = sum / 10.0;
+
+  float voltage = adc * 5.0 / 1023.0;
+
+  float ph = (-5.0 * voltage) + 26.0;
+
+  if(ph < 0) ph = 0;
+  if(ph > 14) ph = 14;
+
+  return ph;
+}
+
+void setup()
+{
+  Serial.begin(9600);
+
+  for(int i=0;i<10;i++)
+    phHistory[i] = 7.0;
+}
+
+void loop()
+{
+  float ph = getPH();
+
+  phHistory[historyIndex] = ph;
+  historyIndex++;
+
+  if(historyIndex >= 10)
+    historyIndex = 0;
+
+  float avgPH = 0;
+
+  for(int i=0;i<10;i++)
+    avgPH += phHistory[i];
+
+  avgPH /= 10.0;
+
+  Serial.print("pH = ");
+  Serial.println(avgPH, 2);
+
+  delay(500);
+}
