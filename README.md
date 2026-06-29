@@ -1,4 +1,7 @@
 # LoRa-Based-Smart-Water-Quality-Monitoring-System
+<img width="1882" height="843" alt="Webdashboard" src="https://github.com/user-attachments/assets/98d18797-a8db-46a3-a824-224bf99259b7" />
+<img width="1582" height="672" alt="data" src="https://github.com/user-attachments/assets/58d82c36-7f09-4c9f-af29-7d40ff83c8b8" />
+<img width="1408" height="768" alt="Gemini_Generated_Image_qe2wngqe2wngqe2w" src="https://github.com/user-attachments/assets/47c97f71-4bb2-44c6-87b3-637ca5e92905" />
 The LoRa-Based Smart Water Quality Monitoring System is an IoT solution designed for long-range, real-time monitoring of water quality in rivers, fish farms, reservoirs, lakes, and industrial water systems.
 
 The transmitter node continuously collects sensor data and sends it over a LoRa wireless network to a receiver node. The receiver uses an ESP32 to upload the received data to Firebase Realtime Database via Wi-Fi. A responsive HTML, CSS, and JavaScript dashboard retrieves the data using the Firebase API and displays live graphs, historical trends, alerts, and monitoring information.
