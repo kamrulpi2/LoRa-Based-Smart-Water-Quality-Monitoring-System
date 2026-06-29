@@ -41,7 +41,7 @@ HTML + CSS + JavaScript Dashboard
 Live Monitoring, Charts, Alerts & Analytics
 
 🔧 Hardware Components
-
+<img width="950" height="689" alt="circuit (1)" src="https://github.com/user-attachments/assets/88eaf29e-3432-484c-b476-f3f6171e0cfa" />
 Arduino UNO
 ESP32 DevKit
 LoRa Module (E32/E220/SX1278)
