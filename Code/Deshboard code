@@ -331,14 +331,7 @@
     const REALTIME_DB_URL = `https://waterlora-v1-default-rtdb.firebaseio.com/sensors/${DEVICE_ID}/readings.json`;
 
     const firebaseConfig = {
-      apiKey: "AIzaSyCHCmIuMf632JTqbbMyjQQwydQy7SkMKrE",
-      authDomain: "waterlora-v1.firebaseapp.com",
-      databaseURL: "https://waterlora-v1-default-rtdb.firebaseio.com",
-      projectId: "waterlora-v1",
-      storageBucket: "waterlora-v1.appspot.com",
-      messagingSenderId: "549819825919",
-      appId: "1:549819825919:web:32c2281596ed2e2f63d6ca",
-      measurementId: "G-XGZFBB3J77"
+  // your firebase data give.....
     };
 
     let firebaseApp = null, firestore = null, realtimeDb = null, realtimeRef = null;
