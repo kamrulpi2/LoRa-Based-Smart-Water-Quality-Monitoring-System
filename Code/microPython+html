@@ -1,0 +1,316 @@
+# water_quality_flask_app.py
+# Single-file Flask application that:
+# 1) On the first run, writes the frontend files (templates/index.html and static/style.css)
+# 2) Starts a Flask server that proxies your Google Apps Script API for table data
+# 3) Generates a Matplotlib PNG chart at /chart.png from the live data
+# 4) Serves a modern responsive UI at /
+
+from flask import Flask, render_template, send_file, jsonify, request
+import os
+import io
+import time
+import json
+import requests
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
+# ----------------------
+# CONFIG — edit these if needed
+# ----------------------
+API_URL = (
+    (* "https://script.googleusercontent.com/macros/echo?user_content_key="
+    "AehSKLjVMw-wtTVzf6ElHtGvKRP6QeMGQ9yh-wwafPSZh9ljYE2gNZT9UW58NY3AWLHHsyXUvCWaKURPdzJz6rcn3wiiKVWZsmNZ01RmL-QOeZ_xJIbGGivCSjGkXy7aTjTI9yGwAqTCocPzFqbp9D4jvI_SL65hGwL4GoKtFe_w92P_tpLqigemKmeaQ58QvN2Rj2xvrsarXerGMoXMe2ERmI1xqY1lsRhn36OaLkWXPZoqTLOxbyDhJq5nuF-TXYcvLGI0Y3vIU--gtUPVg_478dqgGgtGyA"
+    "&lib=MdPvN4h3zHQzn_ai6w05Hz2XbYuIH817B" *)
+)
+# ----------------------
+
+app = Flask(__name__)
+
+# Create folders and files for frontend if they don't exist
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMPLATES_DIR = os.path.join(BASE_DIR, 'templates')
+STATIC_DIR = os.path.join(BASE_DIR, 'static')
+
+os.makedirs(TEMPLATES_DIR, exist_ok=True)
+os.makedirs(STATIC_DIR, exist_ok=True)
+
+INDEX_HTML = r'''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Water Quality Monitoring</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🌊 Water Quality Dashboard</div>
+    <div class="meta">Live • Matplotlib-powered chart</div>
+  </header>
+
+  <main class="container">
+    <section class="card" id="overview">
+      <div class="card-head">
+        <h2>📋 Latest Measurements</h2>
+        <div class="actions">
+          <button id="refreshBtn">Refresh</button>
+          <label class="auto-label">Auto-refresh
+            <input type="checkbox" id="autoRefresh" checked />
+          </label>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table id="dataTable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>pH</th>
+              <th>Temperature (°C)</th>
+              <th>Turbidity (NTU)</th>
+              <th>Dissolved O₂ (mg/L)</th>
+              <th>Conductivity (µS/cm)</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>📈 Combined Trends</h2>
+      <div class="chart-wrap">
+        <img id="chartImg" src="/chart.png" alt="Water quality chart" />
+      </div>
+    </section>
+
+    <footer class="foot">API: proxied from your Google Apps Script • Last update: <span id="lastUpdate">--</span></footer>
+  </main>
+
+<script>
+const REFRESH_INTERVAL = 10000; // 10s
+let autoRefreshTimer = null;
+
+async function fetchData() {
+  try {
+    const res = await fetch('/data');
+    const payload = await res.json();
+    const data = payload.data || [];
+
+    const tbody = document.querySelector('#dataTable tbody');
+    tbody.innerHTML = '';
+    data.forEach((row, idx) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${idx+1}</td>
+        <td>${row.pH ?? ''}</td>
+        <td>${row['Temperature (°C)'] ?? ''}</td>
+        <td>${row['Turbidity (NTU)'] ?? ''}</td>
+        <td>${row['Dissolved Oxygen (mg/L)'] ?? ''}</td>
+        <td>${row['Conductivity (µS/cm)'] ?? ''}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    // update last update time
+    document.getElementById('lastUpdate').textContent = new Date().toLocaleString();
+
+    // refresh chart image by appending timestamp (cache-bust)
+    const chart = document.getElementById('chartImg');
+    chart.src = '/chart.png?ts=' + Date.now();
+
+  } catch (err) {
+    console.error('Error fetching /data', err);
+  }
+}
+
+// UI controls
+document.getElementById('refreshBtn').addEventListener('click', fetchData);
+document.getElementById('autoRefresh').addEventListener('change', (e) => {
+  if (e.target.checked) startAuto(); else stopAuto();
+});
+
+function startAuto() {
+  if (autoRefreshTimer) return;
+  autoRefreshTimer = setInterval(fetchData, REFRESH_INTERVAL);
+}
+function stopAuto() {
+  if (!autoRefreshTimer) return;
+  clearInterval(autoRefreshTimer);
+  autoRefreshTimer = null;
+}
+
+// initial load
+fetchData();
+startAuto();
+</script>
+</body>
+</html>
+'''
+
+STYLE_CSS = r'''
+:root{
+  --bg:#f4f7fb;
+  --card:#ffffff;
+  --accent1:#0077b6;
+  --accent2:#0096c7;
+  --muted:#6b7280;
+}
+*{box-sizing:border-box}
+body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial; margin:0; background:var(--bg); color:#111}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:18px 24px;background:linear-gradient(90deg,var(--accent1),var(--accent2));color:#fff}
+.topbar .brand{font-weight:700;font-size:18px}
+.container{max-width:1100px;margin:28px auto;padding:0 16px}
+.card{background:var(--card);border-radius:12px;box-shadow:0 6px 18px rgba(15,23,42,0.06);padding:18px;margin-bottom:18px}
+.card-head{display:flex;align-items:center;justify-content:space-between}
+.table-wrap{overflow:auto}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th,td{padding:12px 10px;text-align:center;border-bottom:1px solid #eef2f6}
+th{background:linear-gradient(90deg,var(--accent1),var(--accent2));color:#fff;font-weight:600}
+tr:nth-child(even){background:#fbfdff}
+.actions{display:flex;gap:8px;align-items:center}
+button{background:var(--accent1);color:#fff;padding:8px 12px;border-radius:8px;border:none;cursor:pointer}
+button:hover{opacity:0.95}
+.auto-label{font-size:13px;color:var(--muted)}
+.chart-wrap{display:flex;justify-content:center;align-items:center;padding:12px}
+.chart-wrap img{max-width:100%;height:auto;border-radius:10px;box-shadow:0 6px 18px rgba(15,23,42,0.06)}
+.foot{font-size:13px;color:var(--muted);padding:10px 0;text-align:center}
+
+@media (max-width:700px){
+  .topbar{flex-direction:column;gap:8px;text-align:center}
+  .card-head{flex-direction:column;align-items:flex-start;gap:12px}
+}
+'''
+
+# Write the files if they don't exist or content differs
+index_path = os.path.join(TEMPLATES_DIR, 'index.html')
+style_path = os.path.join(STATIC_DIR, 'style.css')
+
+def write_if_diff(path, content):
+    try:
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                old = f.read()
+            if old == content:
+                return
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f'Wrote: {path}')
+    except Exception as e:
+        print('Error writing', path, e)
+
+write_if_diff(index_path, INDEX_HTML)
+write_if_diff(style_path, STYLE_CSS)
+
+# ----------------------
+# Helper to fetch and normalize data
+# ----------------------
+
+def fetch_api_data():
+    try:
+        resp = requests.get(API_URL, timeout=10)
+        resp.raise_for_status()
+        payload = resp.json()
+        data = payload.get('data') if isinstance(payload, dict) else payload
+        if not isinstance(data, list):
+            return []
+        # Normalize rows: ensure keys exist and parse floats when possible
+        normalized = []
+        for row in data:
+            if not isinstance(row, dict):
+                continue
+            normalized.append({
+                'pH': tryfloat(row.get('pH')),
+                'Temperature (°C)': tryfloat(row.get('Temperature (°C)')),
+                'Turbidity (NTU)': tryfloat(row.get('Turbidity (NTU)')),
+                'Dissolved Oxygen (mg/L)': tryfloat(row.get('Dissolved Oxygen (mg/L)')),
+                'Conductivity (µS/cm)': tryfloat(row.get('Conductivity (µS/cm)')),
+            })
+        return normalized
+    except Exception as e:
+        print('Error fetching API:', e)
+        return []
+
+
+def tryfloat(v):
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except Exception:
+        try:
+            # sometimes values have extra whitespace
+            return float(str(v).strip())
+        except Exception:
+            return None
+
+# ----------------------
+# Routes
+# ----------------------
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/data')
+def data_route():
+    data = fetch_api_data()
+    return jsonify({'data': data})
+
+@app.route('/chart.png')
+def chart_png():
+    # fetch data
+    data = fetch_api_data()
+    # prepare x (reading indices) and y series
+    x = list(range(1, len(data)+1))
+    ph = [d['pH'] for d in data]
+    temp = [d['Temperature (°C)'] for d in data]
+    turb = [d['Turbidity (NTU)'] for d in data]
+    do = [d['Dissolved Oxygen (mg/L)'] for d in data]
+    cond = [d['Conductivity (µS/cm)'] for d in data]
+
+    plt.figure(figsize=(10,4.5), dpi=100)
+    ax = plt.gca()
+    # Plot each series if it has at least one non-None value
+    if any(v is not None for v in ph):
+        ax.plot(x, ph, marker='o', label='pH')
+    if any(v is not None for v in temp):
+        ax.plot(x, temp, marker='o', label='Temperature (°C)')
+    if any(v is not None for v in turb):
+        ax.plot(x, turb, marker='o', label='Turbidity (NTU)')
+    if any(v is not None for v in do):
+        ax.plot(x, do, marker='o', label='Dissolved O₂ (mg/L)')
+    if any(v is not None for v in cond):
+        ax.plot(x, cond, marker='o', label='Conductivity (µS/cm)')
+
+    ax.set_xlabel('Readings')
+    ax.set_ylabel('Value')
+    ax.set_title('Water Quality Trends')
+    ax.grid(True, linestyle='--', alpha=0.4)
+    ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.35), ncol=3)
+
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight')
+    plt.close()
+    buf.seek(0)
+
+    # send image with cache-control disabled so frontend can refresh easily
+    return send_file(buf, mimetype='image/png', as_attachment=False, download_name='chart.png')
+
+# ----------------------
+# Run server
+# ----------------------
+
+if __name__ == '__main__':
+    # Simple dependency check message
+    try:
+        import flask, requests, matplotlib
+    except Exception:
+        print('\nMake sure dependencies are installed:')
+        print('  pip install flask requests matplotlib')
+    print('\nStarting Flask server on http://127.0.0.1:5000')
+    app.run(debug=True)
