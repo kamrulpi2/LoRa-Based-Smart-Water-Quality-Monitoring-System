@@ -1,1 +1,799 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Water Quality Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
+  <style>
+    /* ===== styles.css INLINED ===== */
+    :root {
+      --font-family: 'Inter', system-ui, sans-serif;
+      --primary-color: #07f5ab;
+      --primary-color-dark: #06c489;
+      --background-color: #121212;
+      --content-bg: #1e1e1e;
+      --sidebar-bg: #1e1e1e;
+      --widget-bg: #282828;
+      --text-color: #e0e0e0;
+      --text-color-light: #a0a0a0;
+      --border-color: #383838;
+      --shadow: 0 4px 20px rgba(0,0,0,0.25);
+      --border-radius-md: 12px;
+      --border-radius-lg: 16px;
+      --gradient: none;
+      --gradient-accent: linear-gradient(135deg, var(--primary-color), var(--primary-color-dark));
+      --bg-dark: var(--background-color);
+      --bg-light: #f5f7fa;
+      --text-light: var(--text-color);
+      --text-dark: #0e141c;
+      --card-dark: var(--widget-bg);
+      --card-light: rgba(255,255,255,0.9);
+      --shadow-legacy: 0 12px 30px -10px rgba(0,0,0,0.65);
+      --radius: var(--border-radius-lg);
+      --transition: 0.3s ease;
+      --good: #2ecc71;
+      --warn: #f1c40f;
+      --bad: #e74c3c;
+      --accent: var(--primary-color);
+      --accent-alt: #ff6b6b;
+    }
+
+    html[data-theme='dark'] { --bg: var(--bg-dark); --text: var(--text-light); --card: var(--card-dark); }
+    html[data-theme='light'] { --bg: var(--bg-light); --text: var(--text-dark); --card: #ffffffee; }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font-family);
+      background: var(--background-color);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    html { scroll-behavior: smooth; }
+    #dashboard, #history, #charts { scroll-margin-top: 86px; }
+    .hidden { display: none !important; }
+
+    #app.shell { flex: 1; display: grid; grid-template-columns: 250px 1fr; }
+    body.sidebar-collapsed #app.shell { grid-template-columns: 84px 1fr; }
+
+    .sidebar {
+      position: sticky; top: 0; align-self: start;
+      height: 100vh; padding: 18px 14px 18px 16px;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border-color);
+    }
+    .side-brand { display:flex; align-items:center; gap:.6rem; padding:8px 10px; border-radius:12px; }
+    .side-logo { width:34px; height:34px; display:grid; place-items:center; border-radius:10px; background: var(--primary-color); color:#121212; font-weight:700; }
+    .side-title { line-height:1; }
+    .side-title .kicker { display:block; font-size:.7rem; opacity:.8; letter-spacing:.6px; }
+    .side-title strong { font-weight:700; letter-spacing:.6px; }
+
+    .side-menu { display:flex; flex-direction:column; gap:6px; margin:14px 0; }
+    .side-menu a { color: var(--text-color-light); text-decoration:none; font-size:.9rem; padding:12px 14px; border-radius: var(--border-radius-md); margin: 2px 6px; }
+    .side-menu a:hover { background: var(--widget-bg); color: var(--primary-color); }
+    .side-menu a.active { background: var(--primary-color); color:#121212; box-shadow: 0 4px 12px rgba(7,245,171,.2); }
+    .sidebar-toggle { margin-top:auto; width:100%; background: var(--widget-bg); color:#fff; border:1px solid var(--border-color); border-radius: var(--border-radius-md); padding:.55rem 0; cursor:pointer; }
+
+    .main { min-height: 100vh; display: flex; flex-direction: column; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; padding: 20px 24px; border-bottom: 1px solid var(--border-color); background: var(--sidebar-bg); position: sticky; top: 0; z-index: 10; }
+    .topbar-title { display:flex; align-items:center; gap:14px; }
+    .topbar-title h1 { font-size: 1.25rem; letter-spacing:.4px; margin:0; }
+    .topbar-accent { width:120px; height:2px; background: linear-gradient(90deg, var(--primary-color), transparent); }
+    .topbar-actions { display:flex; align-items:center; gap:12px; }
+    .status-indicator { display:flex; align-items:center; gap:.5rem; font-size:.75rem; background: rgba(255,255,255,.04); padding:.4rem .65rem; border-radius: 999px; border: 1px solid var(--border-color); }
+    .status-indicator .pulse { width:10px; height:10px; border-radius:50%; background: var(--accent); box-shadow: 0 0 10px var(--accent), 0 0 0 0 var(--accent); animation: pulse 2s infinite; }
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(0,198,255,.8);} 70% { box-shadow: 0 0 0 12px rgba(0,198,255,0);} 100% { box-shadow: 0 0 0 0 rgba(0,198,255,0);} }
+
+    .content { width: 100%; max-width: 1280px; margin: 0 auto; padding: 1.2rem 1.4rem 3rem; background: var(--content-bg); }
+    .content::-webkit-scrollbar { width: 8px; }
+    .content::-webkit-scrollbar-track { background: var(--content-bg); }
+    .content::-webkit-scrollbar-thumb { background-color: var(--widget-bg); border-radius: 10px; border: 2px solid var(--content-bg); }
+    .content::-webkit-scrollbar-thumb:hover { background-color: var(--primary-color); }
+
+    .dashboard { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill,minmax(220px,1fr)); margin-bottom: 1.2rem; padding: 0 .4rem; }
+    .card {
+      background: var(--widget-bg);
+      border-radius: var(--radius);
+      padding: .9rem 1rem 1rem;
+      position: relative;
+      border: 1px solid var(--border-color);
+      box-shadow: none;
+      display: flex; flex-direction: column; gap: .4rem;
+      overflow: hidden;
+      isolation: isolate;
+      animation: fadeIn .7s ease;
+    }
+    .dashboard .card { min-height: 140px; max-height: 500px; }
+    .card::before { content:""; position:absolute; inset:0; background:none; pointer-events:none; }
+    .card::after { content:""; position:absolute; inset:-1px; border-radius: inherit; pointer-events:none; box-shadow: none; }
+    .card:hover { transform: translateY(-6px); border-color: var(--primary-color); transition: transform .25s ease, border-color .25s ease; }
+    @keyframes fadeIn { from { opacity:0; transform: translateY(6px);} to { opacity:1; transform: translateY(0);} }
+
+    .card h2 { font-size: .8rem; font-weight:600; text-transform: uppercase; letter-spacing:.5px; margin:0; opacity:.85; }
+    .value { font-size: 1.6rem; font-weight:600; letter-spacing:.5px; }
+    .badge { font-size:.65rem; padding:.35rem .55rem; border-radius: 6px; display:inline-block; font-weight:500; letter-spacing:.5px; background:rgba(255,255,255,.12); }
+    .card canvas.mini {
+      margin-top:.3rem;
+      width:100%;
+      height:24px !important;
+      border-radius:8px;
+      background: rgba(0,0,0,.25);
+      box-shadow: inset 0 0 0 1px rgba(0,224,255,.15), 0 0 0 1px rgba(0,224,255,.08);
+    }
+    #phMini, #tdsMini, #tempMini, #doMini, #lockMini { height: 200px !important; max-height: 300px; }
+    .badge.good { background: var(--good); color:#fff; }
+    .badge.warn { background: var(--warn); color:#222; }
+    .badge.bad { background: var(--bad); color:#fff; }
+
+    .controls { display:flex; flex-wrap:wrap; gap:.75rem; margin-bottom:1.6rem; }
+    .btn { border:none; cursor:pointer; font-family:inherit; font-size:.8rem; font-weight:600; letter-spacing:.5px; padding:.75rem 1.1rem; border-radius: 12px; position:relative; overflow:hidden; transition:var(--transition); }
+    .btn.primary { background: var(--gradient-accent); color:#fff; }
+    .btn.primary:hover { filter:brightness(1.1); }
+    .btn.outline { background: transparent; color: var(--accent); border:1px solid var(--accent); }
+    .btn.outline:hover { background: var(--accent); color:#fff; }
+    .btn.subtle { background: rgba(255,255,255,.08); color:#fff; border:1px solid var(--border-color); }
+    .btn.subtle:hover { background: rgba(255,255,255,.25); }
+    .btn:active { transform: scale(.96); }
+
+    .pond-select-wrap { display:flex; align-items:center; gap:.45rem; background: var(--card); border-radius: 12px; padding:.45rem .6rem; box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+    .pond-label { font-size:.75rem; opacity:.8; }
+    .pond-select { border:none; background: transparent; color: var(--text); font-family:inherit; font-weight:600; letter-spacing:.4px; padding:.35rem .4rem; outline:none; }
+    [data-theme='light'] .pond-select-wrap { box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+
+    .charts { display:grid; gap:1.4rem; grid-template-columns: repeat(auto-fill,minmax(300px,1fr)); }
+    .charts-header { grid-column: 1 / -1; display:flex; align-items:center; justify-content:space-between; }
+    .charts canvas { background: var(--widget-bg); padding:.9rem; border-radius: var(--radius); border: 1px solid var(--border-color); height: 180px; }
+    .charts.compact canvas { height: 120px; }
+
+    .history { margin-top: 1.6rem; }
+    .history-header { display:flex; align-items:center; justify-content:space-between; margin: .4rem 0 .6rem; }
+    .history-header h2 { font-size: .9rem; letter-spacing:.5px; margin:0; opacity:.9; }
+    .history-actions .muted { font-size:.75rem; opacity:.7; }
+    .table-wrap { background: var(--widget-bg); border-radius: var(--radius); border: 1px solid var(--border-color); overflow:auto; }
+    .data-table { width:100%; border-collapse: collapse; min-width: 680px; }
+    .data-table thead { position: sticky; top:0; background: rgba(255,255,255,.03); }
+    .data-table th, .data-table td { padding:.75rem .9rem; text-align:left; font-size:.85rem; border-bottom: 1px solid var(--border-color); color: var(--text-color); }
+    [data-theme='light'] .data-table th, [data-theme='light'] .data-table td { border-bottom: 1px solid rgba(0,0,0,.08); }
+    .data-table tbody tr:hover { background: rgba(255,255,255,.04); }
+    .muted { opacity:.65; }
+
+    .loading { position:fixed; inset:0; background: radial-gradient(circle at 30% 30%, rgba(0,198,255,.15), transparent), var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1rem; z-index:50; transition:opacity .6s ease, visibility .6s ease; }
+    .loading.hidden { opacity:0; visibility:hidden; }
+    .spinner { width:58px; height:58px; border:5px solid rgba(255,255,255,.15); border-top-color: var(--accent); border-radius:50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    .footer { text-align:center; padding:1.6rem .75rem; font-size:.7rem; opacity:.7; margin-top:auto; }
+    .footer a { color: var(--accent); text-decoration:none; }
+
+    ::-webkit-scrollbar { width:10px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 99px; }
+    [data-theme='light'] ::-webkit-scrollbar-thumb { background: rgba(0,0,0,.2); }
+
+    @media (max-width: 640px) {
+      #app.shell { grid-template-columns: 84px 1fr; }
+      .value { font-size: 1.4rem; }
+      .charts { grid-template-columns: 1fr; }
+      .charts canvas { height: 150px; }
+      .charts.compact canvas { height: 110px; }
+      .dashboard { grid-template-columns: repeat(auto-fill,minmax(140px,1fr)); }
+      .dashboard .card { min-height: 130px; max-height: 200px; }
+    }
+
+    body.sidebar-collapsed .sidebar { padding-right: 10px; }
+    body.sidebar-collapsed .side-title { display:none; }
+    body.sidebar-collapsed .side-menu a { text-align:center; }
+
+    .flash { box-shadow: 0 0 0 0 rgba(0,198,255,.8); animation: flashPulse 1.2s ease; }
+    @keyframes flashPulse { 0% { box-shadow: 0 0 0 0 rgba(0,198,255,.9);} 70% { box-shadow: 0 0 0 18px rgba(0,198,255,0);} 100% { box-shadow: 0 0 0 0 rgba(0,198,255,0);} }
+  </style>
+</head>
+<body>
+  <div id="app" class="shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="side-brand">
+        <div class="side-logo">Water</div>
+        <div class="side-title">
+          <span class="kicker">Aqua</span>
+          <strong>Monitor</strong>
+        </div>
+      </div>
+      <nav class="side-menu">
+        <a href="#dashboard" class="active">Dashboard</a>
+        <a href="#history">Saved Data</a>
+        <a href="#charts">Charts</a>
+      </nav>
+      <button id="sidebarToggle" class="sidebar-toggle" aria-label="Collapse sidebar">Menu</button>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1>Dashboard Overview</h1>
+          <span class="topbar-accent"></span>
+        </div>
+        <div class="topbar-actions">
+          <button id="themeToggle" class="btn subtle" aria-label="Toggle theme">Theme</button>
+          <div class="status-indicator" id="connectionStatus" title="Connection status">
+            <span class="pulse"></span><span class="label">Connecting...</span>
+          </div>
+        </div>
+      </header>
+
+      <main class="content">
+        <section class="dashboard" id="dashboard">
+          <div class="card" id="phCard">
+            <h2>pH</h2>
+            <div class="value" id="phValue">--</div>
+            <div class="badge" id="phStatus">Waiting</div>
+            <canvas id="phMini" class="mini"></canvas>
+          </div>
+          <div class="card" id="tdsCard">
+            <h2>TDS (ppm)</h2>
+            <div class="value" id="tdsValue">--</div>
+            <canvas id="tdsMini" class="mini"></canvas>
+          </div>
+          <div class="card" id="tempCard">
+            <h2>Temperature (°C)</h2>
+            <div class="value" id="tempValue">--</div>
+            <canvas id="tempMini" class="mini"></canvas>
+          </div>
+          <div class="card" id="doCard">
+            <h2>DO</h2>
+            <div class="value" id="doValue">--</div>
+            <div class="badge" id="doStatus">--</div>
+            <canvas id="doMini" class="mini"></canvas>
+          </div>
+          <div class="card" id="lockCard">
+            <h2>Lock</h2>
+            <div class="value" id="lockValue">--</div>
+            <div class="badge" id="lockStatus">--</div>
+            <canvas id="lockMini" class="mini"></canvas>
+          </div>
+        </section>
+
+        <section class="controls">
+          <label class="pond-select-wrap">
+            <span class="pond-label">Pond:</span>
+            <select id="pondSelect" class="pond-select" aria-label="Select pond"></select>
+          </label>
+          <button id="saveSnapshot" class="btn primary">Save Data</button>
+          <button id="addPondBtn" class="btn outline">Add Pond</button>
+          <button id="exportCsv" class="btn outline">Export CSV</button>
+          <button id="fastModeToggle" class="btn subtle" aria-pressed="true">Fast Mode: ON</button>
+          <button id="toggleCharts" class="btn subtle" aria-pressed="false">Hide Charts</button>
+        </section>
+
+        <section class="history" id="history">
+          <div class="history-header">
+            <h2>Saved History</h2>
+            <div class="history-actions">
+              <span id="savedCount" class="muted"></span>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" aria-label="Saved snapshots table">
+              <thead>
+                <tr>
+                  <th>Pond</th>
+                  <th>Time</th>
+                  <th>pH</th>
+                  <th>TDS</th>
+                  <th>Temp</th>
+                  <th>DO</th>
+                  <th>Lock</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="savedTbody">
+                <tr><td colspan="8" class="muted">No data</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="charts hidden compact" id="charts">
+          <div class="charts-header">
+            <h2>Live Charts</h2>
+            <button id="chartsSizeToggle" class="btn subtle" aria-pressed="true">Compact</button>
+          </div>
+          <canvas id="phChart"></canvas>
+          <canvas id="tdsChart"></canvas>
+          <canvas id="tempChart"></canvas>
+          <canvas id="doChart"></canvas>
+          <canvas id="lockChart"></canvas>
+        </section>
+
+        <div id="loading" class="loading">
+          <div class="spinner"></div>
+          <p>Loading sensor data...</p>
+        </div>
+      </main>
+
+      <footer class="footer">
+        <p>Developed by Kamrul · <span id="year"></span></p>
+      </footer>
+    </div>
+  </div>
+
+  <script>
+    /* ===== app.js INLINED ===== */
+    const DEVICE_ID = '000000B52134E3EC';
+    const REALTIME_DB_URL = `https://waterlora-v1-default-rtdb.firebaseio.com/sensors/${DEVICE_ID}/readings.json`;
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCHCmIuMf632JTqbbMyjQQwydQy7SkMKrE",
+      authDomain: "waterlora-v1.firebaseapp.com",
+      databaseURL: "https://waterlora-v1-default-rtdb.firebaseio.com",
+      projectId: "waterlora-v1",
+      storageBucket: "waterlora-v1.appspot.com",
+      messagingSenderId: "549819825919",
+      appId: "1:549819825919:web:32c2281596ed2e2f63d6ca",
+      measurementId: "G-XGZFBB3J77"
+    };
+
+    let firebaseApp = null, firestore = null, realtimeDb = null, realtimeRef = null;
+    let realtimeActive = false, unsubscribeSaved = null, selectedPond = 'pond-1';
+    let pollIntervalMs = 1500, charts = {}, miniCharts = {}, chartDataBuffers = { ph:[], tds:[], temperature:[], do:[], lock:[] };
+    const maxPoints = 50, miniMaxPoints = 30;
+    let firstDataLoaded = false, savedDocsBuffer = [], ponds = [];
+
+    const phValueEl = document.getElementById('phValue'), phStatusEl = document.getElementById('phStatus');
+    const tdsValueEl = document.getElementById('tdsValue'), tempValueEl = document.getElementById('tempValue');
+    const doValueEl = document.getElementById('doValue'), doStatusEl = document.getElementById('doStatus');
+    const lockValueEl = document.getElementById('lockValue'), lockStatusEl = document.getElementById('lockStatus');
+    const connectionStatusEl = document.getElementById('connectionStatus'), loadingEl = document.getElementById('loading');
+    const yearEl = document.getElementById('year'), saveBtn = document.getElementById('saveSnapshot');
+    const exportBtn = document.getElementById('exportCsv'), pondSelectEl = document.getElementById('pondSelect');
+    const addPondBtn = document.getElementById('addPondBtn'), toggleChartsBtn = document.getElementById('toggleCharts');
+    const sidebarToggleBtn = document.getElementById('sidebarToggle'), chartsSection = document.getElementById('charts');
+    const chartsSizeToggleBtn = document.getElementById('chartsSizeToggle'), fastModeToggleBtn = document.getElementById('fastModeToggle');
+    const savedTbodyEl = document.getElementById('savedTbody'), savedCountEl = document.getElementById('savedCount');
+
+    function loadFirebase() {
+      const s1 = document.createElement('script');
+      s1.src = 'https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js';
+      s1.onload = () => {
+        const s2 = document.createElement('script');
+        s2.src = 'https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js';
+        s2.onload = () => {
+          const s3 = document.createElement('script');
+          s3.src = 'https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js';
+          s3.onload = initFirebase;
+          document.head.appendChild(s3);
+        };
+        document.head.appendChild(s2);
+      };
+      document.head.appendChild(s1);
+    }
+
+    function initFirebase() {
+      try {
+        firebaseApp = firebase.initializeApp(firebaseConfig);
+        firestore = firebase.firestore();
+        try { realtimeDb = firebase.database(); } catch(_) {}
+        console.log('Firebase initialized');
+        startSavedListener();
+      } catch (e) { console.warn('Firebase init failed', e); }
+    }
+
+    function initTheme() {
+      const saved = localStorage.getItem('theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', saved);
+    }
+
+    function toggleTheme() {
+      const current = document.documentElement.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+    }
+
+    function createChart(ctxId, label, color, yBounds = null, yExtra = {}) {
+      const ctx = document.getElementById(ctxId).getContext('2d');
+      return new Chart(ctx, {
+        type: 'line', data: { labels: [], datasets: [{ label, data: [], borderColor: color, backgroundColor: color + '33', tension: 0.35, fill: true, pointRadius: 0 }] },
+        options: { responsive: true, maintainAspectRatio: false, animation: { duration: 150 }, scales: { x: { ticks: { display: false }, grid: { display: false } }, y: { beginAtZero: false, grid: { color: 'rgba(255,255,255,.07)' }, ...(yBounds ? { min: yBounds.min, max: yBounds.max } : {}), ...yExtra } }, plugins: { legend: { display: false } } }
+      });
+    }
+
+    function createSpark(canvasId, color, yBounds = null, yAxisOverrides = null) {
+      const el = document.getElementById(canvasId);
+      if (!el) return null;
+      const ctx = el.getContext('2d');
+      return new Chart(ctx, {
+        type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: color, backgroundColor: color + '22', tension: 0.35, pointRadius: 0, borderWidth: 1.6, fill: true }] },
+        options: { responsive: true, maintainAspectRatio: false, animation: { duration: 300 }, scales: { x: { display: false }, y: { display: false, ...(yBounds ? { min: yBounds.min, max: yBounds.max } : {}), ...(yAxisOverrides || {}) } }, plugins: { legend: { display: false }, tooltip: { enabled: false } } }
+      });
+    }
+
+    function initCharts() {
+      charts.ph = createChart('phChart', 'pH', '#00c6ff', { min: 0, max: 14 }, { ticks: { stepSize: 2, color: '#a0a0a0' } });
+      charts.tds = createChart('tdsChart', 'TDS', '#ff6b6b');
+      charts.temperature = createChart('tempChart', 'Temp', '#ffa62b');
+      charts.do = createChart('doChart', 'DO', '#2ecc71');
+      charts.lock = createChart('lockChart', 'Lock', '#9b59b6');
+
+      miniCharts.ph = createSpark('phMini', '#00c6ff', { min: 0, max: 14 }, { display: true, ticks: { stepSize: 2, color: '#a0a0a0', font: { size: 10 }, padding: 2 }, grid: { display: true, color: 'rgba(255,255,255,.08)' } });
+      miniCharts.tds = createSpark('tdsMini', '#ff6b6b');
+      miniCharts.temperature = createSpark('tempMini', '#ffa62b');
+      miniCharts.do = createSpark('doMini', '#2ecc71');
+      miniCharts.lock = createSpark('lockMini', '#9b59b6');
+    }
+
+    function updateCharts(data) {
+      const timestamp = new Date().toLocaleTimeString();
+      const map = [['ph', data.ph], ['tds', data.tds], ['temperature', data.temperature], ['do', data.do ? 1 : 0], ['lock', data.lock ? 1 : 0]];
+      map.forEach(([key, value]) => {
+        if (value === undefined || value === null) return;
+        const buffer = chartDataBuffers[key];
+        buffer.push(value);
+        if (buffer.length > maxPoints) buffer.shift();
+        const ch = charts[key];
+        if (ch) { ch.data.labels.push(timestamp); if (ch.data.labels.length > maxPoints) ch.data.labels.shift(); ch.data.datasets[0].data = buffer; ch.update(); }
+        const spark = miniCharts[key];
+        if (spark) { const dataSlice = buffer.slice(-miniMaxPoints); const labelSlice = ch.data.labels.slice(-miniMaxPoints); spark.data.labels = labelSlice; spark.data.datasets[0].data = dataSlice; spark.update(); }
+      });
+    }
+
+    function refreshCharts() {
+      Object.values(charts).forEach(ch => { try { ch.resize(); ch.update(); } catch (_) {} });
+    }
+
+    async function fetchSensorData() {
+      if (realtimeActive) return;
+      try {
+        const res = await fetch(REALTIME_DB_URL + '?_ts=' + Date.now());
+        if (!res.ok) throw new Error('Network error');
+        const json = await res.json();
+        const data = normalizeData(json);
+        applyData(data);
+        connectionHealthy();
+        if (!firstDataLoaded) { firstDataLoaded = true; loadingEl.classList.add('hidden'); }
+      } catch (err) { console.warn('Fetch error', err); connectionError(); }
+    }
+
+    function startRealtimeListener() {
+      if (!realtimeDb || realtimeActive) return;
+      try {
+        const path = `sensors/${DEVICE_ID}/readings`;
+        realtimeRef = realtimeDb.ref(path).limitToLast(1);
+        realtimeRef.on('value', snap => {
+          const val = snap.val();
+          const data = normalizeData(val);
+          if (data && (data.ph !== undefined || data.tds !== undefined || data.temperature !== undefined)) {
+            applyData(data);
+            connectionHealthy();
+            if (!firstDataLoaded) { firstDataLoaded = true; loadingEl.classList.add('hidden'); }
+          }
+        }, err => { console.warn('Realtime error', err); stopRealtimeListener(); });
+        realtimeActive = true;
+        console.log('Realtime listener started');
+      } catch (e) { console.warn('Realtime failed', e); }
+    }
+
+    function stopRealtimeListener() {
+      if (realtimeRef) { try { realtimeRef.off('value'); } catch(_) {} }
+      realtimeRef = null; realtimeActive = false;
+    }
+
+    function normalizeData(raw) {
+      if (!raw) return {};
+      if (Array.isArray(raw)) {
+        for (let i = raw.length - 1; i >= 0; i--) if (raw[i]) return mapSampleReading(raw[i]);
+        return {};
+      }
+      const flatKeys = ['ph','pH','tds','tds_ppm','temperature','temp','tempC','do','lock','rssi','snr'];
+      if (flatKeys.some(k => Object.prototype.hasOwnProperty.call(raw, k))) return mapSampleReading(raw);
+      const keys = Object.keys(raw);
+      if (!keys.length) return {};
+      const latestKey = keys.sort((a, b) => Number(a) - Number(b))[keys.length - 1];
+      const latest = raw[latestKey];
+      return latest && typeof latest === 'object' ? mapSampleReading(latest) : {};
+    }
+
+    function mapSampleReading(r) {
+      const ph = r.ph ?? r.pH;
+      const tds = r.tds ?? r.tds_ppm;
+      const temperature = (r.tempC !== undefined ? r.tempC : (r.temperature ?? r.temp ?? null));
+      const dissolvedOxygen = typeof r.do === 'number' ? r.do === 1 : !!r.do;
+      const locked = typeof r.lock === 'number' ? r.lock === 1 : !!r.lock;
+      return {
+        ph: ph !== undefined ? Number(ph) : undefined,
+        tds: tds !== undefined ? Number(tds) : undefined,
+        temperature: temperature !== undefined && temperature !== null ? Number(temperature) : undefined,
+        do: dissolvedOxygen,
+        lock: locked,
+        timestamp: r.timestamp || r.ts || Date.now(),
+        rssi: r.rssi !== undefined ? Number(r.rssi) : undefined,
+        snr: r.snr !== undefined ? Number(r.snr) : undefined
+      };
+    }
+
+    function applyData(data) {
+      if (data.ph !== undefined) { phValueEl.textContent = Number(data.ph).toFixed(2); setPhBadge(Number(data.ph)); }
+      if (data.tds !== undefined) tdsValueEl.textContent = Number(data.tds).toFixed(0);
+      if (data.temperature !== undefined) tempValueEl.textContent = Number(data.temperature).toFixed(1);
+      if (data.do !== undefined) {
+        const on = !!data.do;
+        doValueEl.textContent = on ? 'ON' : 'OFF';
+        doStatusEl.textContent = on ? 'Active' : 'Inactive';
+        doStatusEl.className = 'badge ' + (on ? 'good' : 'bad');
+      }
+      if (data.lock !== undefined) {
+        const locked = !!data.lock;
+        lockValueEl.textContent = locked ? 'YES' : 'NO';
+        lockStatusEl.textContent = locked ? 'Locked' : 'Unlocked';
+        lockStatusEl.className = 'badge ' + (locked ? 'bad' : 'good');
+      }
+      updateCharts(data);
+    }
+
+    function setPhBadge(ph) {
+      let status = 'Unknown', cls = 'warn';
+      if (ph >= 6.5 && ph <= 8.5) { status = 'Good'; cls = 'good'; }
+      else if ((ph >= 5.5 && ph < 6.5) || (ph > 8.5 && ph <= 9.5)) { status = 'Moderate'; cls = 'warn'; }
+      else { status = 'Bad'; cls = 'bad'; }
+      phStatusEl.textContent = status;
+      phStatusEl.className = 'badge ' + cls;
+    }
+
+    function connectionHealthy() {
+      connectionStatusEl.querySelector('.label').textContent = 'Live';
+      connectionStatusEl.querySelector('.pulse').style.background = 'var(--accent)';
+    }
+    function connectionError() {
+      connectionStatusEl.querySelector('.label').textContent = 'Error';
+      connectionStatusEl.querySelector('.pulse').style.background = 'var(--bad)';
+    }
+
+    function startPolling() {
+      fetchSensorData();
+      setInterval(fetchSensorData, pollIntervalMs);
+    }
+
+    function loadPonds() {
+      try {
+        const raw = localStorage.getItem('ponds-v1');
+        if (raw) { const list = JSON.parse(raw); if (Array.isArray(list) && list.length) return list; }
+      } catch (_) {}
+      return ['pond-1','pond-2','pond-3'];
+    }
+
+    function savePonds(list) {
+      ponds = Array.from(new Set(list));
+      localStorage.setItem('ponds-v1', JSON.stringify(ponds));
+    }
+
+    function renderPondOptions(list) {
+      if (!pondSelectEl) return;
+      pondSelectEl.innerHTML = '';
+      list.forEach(id => {
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = prettyPondLabel(id);
+        pondSelectEl.appendChild(opt);
+      });
+    }
+
+    function prettyPondLabel(id) {
+      const m = id.match(/^pond-(\d+)$/);
+      return m ? `Pond ${m[1]}` : id.replace(/[-_]+/g,' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function nextPondId() {
+      let max = 0;
+      ponds.forEach(p => { const m = p.match(/^pond-(\d+)$/); if (m) max = Math.max(max, parseInt(m[1],10)); });
+      return `pond-${max + 1}`;
+    }
+
+    function sanitizePondId(input) {
+      if (!input) return '';
+      let id = input.trim().toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'');
+      if (!id.startsWith('pond-')) id = 'pond-' + id.replace(/^pond-+/,'');
+      if (id === 'pond-') id = nextPondId();
+      return id;
+    }
+
+    function addPondFlow() {
+      const name = prompt('Enter pond name (e.g., Pond 4)');
+      const id = sanitizePondId(name || nextPondId());
+      if (!id || ponds.includes(id)) { alert('Invalid or duplicate pond name.'); return; }
+      ponds.push(id);
+      savePonds(ponds);
+      renderPondOptions(ponds);
+      pondSelectEl.value = id;
+      selectedPond = id;
+      startSavedListener();
+    }
+
+    async function saveSnapshot() {
+      if (!firestore) { alert('Firestore not ready.'); return; }
+      const snapshot = {
+        ph: phValueEl.textContent === '--' ? null : parseFloat(phValueEl.textContent),
+        tds: tdsValueEl.textContent === '--' ? null : parseFloat(tdsValueEl.textContent),
+        temperature: tempValueEl.textContent === '--' ? null : parseFloat(tempValueEl.textContent),
+        temp: tempValueEl.textContent === '--' ? null : parseFloat(tempValueEl.textContent),
+        do: doValueEl.textContent === 'ON',
+        lock: lockValueEl.textContent === 'YES',
+        phStatus: phStatusEl.textContent,
+        timestamp: Date.now(),
+        pond: selectedPond
+      };
+      try {
+        await firestore.collection('data').doc(selectedPond).collection('readings').add(snapshot);
+        saveBtn.classList.add('flash');
+        setTimeout(() => saveBtn.classList.remove('flash'), 1200);
+      } catch (e) { console.error('Save failed', e); alert('Failed to save.'); }
+    }
+
+    function startSavedListener() {
+      if (!firestore || !savedTbodyEl) return;
+      if (unsubscribeSaved) unsubscribeSaved();
+      unsubscribeSaved = firestore.collection('data').doc(selectedPond).collection('readings').orderBy('timestamp','desc').limit(200)
+        .onSnapshot(snapshot => {
+          if (snapshot.empty) {
+            savedTbodyEl.innerHTML = '<tr><td colspan="8" class="muted">No data</td></tr>';
+            savedCountEl.textContent = '0 saved (' + selectedPond + ')';
+            savedDocsBuffer = [];
+            return;
+          }
+          const rows = [], buf = [];
+          snapshot.forEach(doc => {
+            const data = { id: doc.id, ...doc.data() };
+            buf.push(data);
+            rows.push(renderSavedRow(data));
+          });
+          savedDocsBuffer = buf;
+          savedTbodyEl.innerHTML = rows.join('');
+          savedCountEl.textContent = snapshot.size + ' saved (' + selectedPond + ')';
+        }, err => {
+          console.error('Listener error', err);
+          savedTbodyEl.innerHTML = '<tr><td colspan="8" class="muted">Error</td></tr>';
+          savedCountEl.textContent = '';
+          savedDocsBuffer = [];
+        });
+    }
+
+    function renderSavedRow(d) {
+      const ts = new Date(d.timestamp || Date.now()).toLocaleString();
+      return `<tr>
+        <td>${d.pond ?? selectedPond}</td>
+        <td>${ts}</td>
+        <td>${d.ph ?? '--'}</td>
+        <td>${d.tds ?? '--'}</td>
+        <td>${d.temperature ?? d.temp ?? '--'}</td>
+        <td>${d.do ? 'ON' : 'OFF'}</td>
+        <td>${d.lock ? 'YES' : 'NO'}</td>
+        <td>${d.phStatus ?? '--'}</td>
+      </tr>`;
+    }
+
+    function exportCsv() {
+      if (!savedDocsBuffer.length) { alert('No data to export for ' + selectedPond); return; }
+      const headers = ['pond','timestamp_iso','timestamp_local','ph','tds','temperature','do','lock','status'];
+      const lines = [headers.join(',')];
+      savedDocsBuffer.forEach(d => {
+        const ts = d.timestamp || Date.now();
+        const iso = new Date(ts).toISOString();
+        const local = new Date(ts).toLocaleString().replace(/,/g,' ');
+        const row = [
+          d.pond || selectedPond, iso, local, d.ph ?? '', d.tds ?? '',
+          (d.temperature ?? d.temp ?? ''), d.do ? 'ON' : 'OFF', d.lock ? 'YES' : 'NO', d.phStatus ?? ''
+        ];
+        const escaped = row.map(v => /[",\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v);
+        lines.push(escaped.join(','));
+      });
+      const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `water-data-${selectedPond}-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+    }
+
+    function setActiveLink(hash) {
+      document.querySelectorAll('.side-menu a').forEach(a => {
+        a.getAttribute('href') === hash ? a.classList.add('active') : a.classList.remove('active');
+      });
+    }
+
+    function init() {
+      yearEl.textContent = new Date().getFullYear();
+      initTheme();
+      initCharts();
+      startPolling();
+      loadFirebase();
+
+      document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+      saveBtn.addEventListener('click', saveSnapshot);
+      if (exportBtn) exportBtn.addEventListener('click', exportCsv);
+      if (toggleChartsBtn && chartsSection) {
+        toggleChartsBtn.addEventListener('click', () => {
+          const hidden = chartsSection.classList.toggle('hidden');
+          toggleChartsBtn.textContent = hidden ? 'Show Charts' : 'Hide Charts';
+          toggleChartsBtn.setAttribute('aria-pressed', String(!hidden));
+        });
+      }
+      if (pondSelectEl) {
+        ponds = loadPonds();
+        renderPondOptions(ponds);
+        selectedPondond = pondSelectEl.value || ponds[0];
+        pondSelectEl.addEventListener('change', () => {
+          selectedPond = pondSelectEl.value;
+          startSavedListener();
+        });
+      }
+      if (addPondBtn) addPondBtn.addEventListener('click', addPondFlow);
+      if (sidebarToggleBtn) {
+        sidebarToggleBtn.addEventListener('click', () => {
+          document.body.classList.toggle('sidebar-collapsed');
+          requestAnimationFrame(refreshCharts);
+        });
+      }
+      if (fastModeToggleBtn) {
+        if (realtimeDb) startRealtimeListener();
+        fastModeToggleBtn.addEventListener('click', () => {
+          const willEnable = !realtimeActive;
+          if (willEnable) startRealtimeListener(); else stopRealtimeListener();
+          fastModeToggleBtn.textContent = 'Fast Mode: ' + (realtimeActive ? 'ON' : 'OFF');
+          fastModeToggleBtn.setAttribute('aria-pressed', String(realtimeActive));
+        });
+      }
+      if (chartsSizeToggleBtn && chartsSection) {
+        chartsSizeToggleBtn.addEventListener('click', () => {
+          const compact = chartsSection.classList.toggle('compact');
+          chartsSizeToggleBtn.textContent = compact ? 'Compact' : 'Expand';
+          chartsSizeToggleBtn.setAttribute('aria-pressed', String(compact));
+          requestAnimationFrame(refreshCharts);
+        });
+      }
+
+      const sideMenu = document.querySelector('.side-menu');
+      if (sideMenu) {
+        sideMenu.addEventListener('click', e => {
+          const link = e.target.closest('a');
+          if (!link || !link.getAttribute('href').startsWith('#')) return;
+          e.preventDefault();
+          const target = document.querySelector(link.getAttribute('href'));
+          if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            setActiveLink(link.getAttribute('href'));
+            if (window.innerWidth <= 640) document.body.classList.add('sidebar-collapsed');
+          }
+        });
+      }
+
+      const sections = ['#dashboard','#history','#charts'].map(s => document.querySelector(s)).filter(Boolean);
+      if (sections.length) {
+        const obs = new IntersectionObserver((entries) => {
+          let topMost = null;
+          entries.forEach(en => {
+            if (en.isIntersecting && (!topMost || en.boundingClientRect.top < topMost.boundingClientRect.top)) topMost = en;
+          });
+          if (topMost && topMost.target && topMost.target.id) setActiveLink('#' + topMost.target.id);
+        }, { rootMargin: '-70px 0px -70% 0px', threshold: 0.2 });
+        sections.forEach(sec => obs.observe(sec));
+      }
+
+      const observer = new IntersectionObserver(entries => {
+        entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+      });
+      document.querySelectorAll('.card, .charts canvas').forEach(el => observer.observe(el));
+    }
+
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>
