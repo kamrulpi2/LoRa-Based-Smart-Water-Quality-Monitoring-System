@@ -66,7 +66,14 @@ Firebase ESP Client
 Cloud................
 
 Firebase Realtime Database
-Frontend
+
+Frontend :
+
+HTML5
+CSS3
+JavaScript
+Chart.js
+Tailwind CSS
 HTML5
 CSS3
 JavaScript
