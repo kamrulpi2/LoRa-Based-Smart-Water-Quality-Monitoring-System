@@ -21,8 +21,7 @@ Mobile and Desktop Support
 Low Power IoT Architecture
 
 📡 System Architecture
-<img width="1408" height="768" alt="Gemini_Generated_Image_qe2wngqe2wngqe2w" src="https://github.com/user-attachments/assets/147f956a-1a5b-4c7f-b7b7-64422da64399" />
-Water Quality Sensors
+
         ↓
 Arduino UNO (LoRa TX)
         ↓
@@ -41,8 +40,7 @@ HTML + CSS + JavaScript Dashboard
 Live Monitoring, Charts, Alerts & Analytics
 
 🔧 Hardware Components
-<img width="950" height="689" alt="circuit (1)" src="https://github.com/user-attachments/assets/88eaf29e-3432-484c-b476-f3f6171e0cfa" />
-
+<img width="950" height="689" alt="circuit (1)" src="
 Arduino UNO
 ESP32 DevKit
 LoRa Module (E32/E220/SX1278)
